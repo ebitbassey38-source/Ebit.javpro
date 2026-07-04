@@ -348,6 +348,52 @@ app.get('/organizations/:id/balances', authMiddleware, async (req, res) => {
 
 
 
+app.put('/organizations/:id/expenses/:expenseId', authMiddleware, expenseValidation, handleValidationErrors, async (req, res) => {
+  try {
+    const membership = await db.query(
+      'SELECT * FROM organization_members WHERE organization_id = $1 AND user_id = $2',
+      [req.params.id, req.userId]
+    );
+    if (membership.rows.length === 0) {
+      return res.status(403).json({ error: 'You are not a member of this organization' });
+    }
+
+    const { description, amount } = req.body;
+
+    const membersResult = await db.query(
+      'SELECT user_id FROM organization_members WHERE organization_id = $1',
+      [req.params.id]
+    );
+    const members = membersResult.rows;
+
+    const updateResult = await db.query(
+      'UPDATE expenses SET description = $1, amount = $2 WHERE id = $3 AND organization_id = $4 RETURNING *',
+      [description, amount, req.params.expenseId, req.params.id]
+    );
+
+    if (updateResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Expense not found' });
+    }
+
+    const expense = updateResult.rows[0];
+
+    await db.query('DELETE FROM expense_splits WHERE expense_id = $1', [req.params.expenseId]);
+
+    const splitAmount = (parseFloat(amount) / members.length).toFixed(2);
+    for (const member of members) {
+      await db.query(
+        'INSERT INTO expense_splits (expense_id, user_id, amount_owed) VALUES ($1, $2, $3)',
+        [expense.id, member.user_id, splitAmount]
+      );
+    }
+
+    res.json({ ...expense, split_between: members.length, amount_per_person: splitAmount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.delete('/organizations/:id/expenses/:expenseId', authMiddleware, async (req, res) => {
   try {
     const membership = await db.query(
