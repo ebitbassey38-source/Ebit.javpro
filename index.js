@@ -308,6 +308,20 @@ app.get('/organizations/:id/balances', authMiddleware, async (req, res) => {
       [req.params.id]
     );
 
+    const settlementsPaidResult = await db.query(
+      `SELECT paid_by as user_id, SUM(amount) as total_settled_paid
+       FROM settlements WHERE organization_id = $1
+       GROUP BY paid_by`,
+      [req.params.id]
+    );
+
+    const settlementsReceivedResult = await db.query(
+      `SELECT paid_to as user_id, SUM(amount) as total_settled_received
+       FROM settlements WHERE organization_id = $1
+       GROUP BY paid_to`,
+      [req.params.id]
+    );
+
     const membersResult = await db.query(
       `SELECT u.id, u.name FROM organization_members om
        JOIN users u ON u.id = om.user_id
@@ -317,11 +331,15 @@ app.get('/organizations/:id/balances', authMiddleware, async (req, res) => {
 
     const paidMap = Object.fromEntries(paidResult.rows.map(r => [r.user_id, parseFloat(r.total_paid)]));
     const owedMap = Object.fromEntries(owedResult.rows.map(r => [r.user_id, parseFloat(r.total_owed)]));
+    const settledPaidMap = Object.fromEntries(settlementsPaidResult.rows.map(r => [r.user_id, parseFloat(r.total_settled_paid)]));
+    const settledReceivedMap = Object.fromEntries(settlementsReceivedResult.rows.map(r => [r.user_id, parseFloat(r.total_settled_received)]));
 
     const balances = membersResult.rows.map(member => {
       const paid = paidMap[member.id] || 0;
       const owed = owedMap[member.id] || 0;
-      const balance = paid - owed;
+      const settledPaid = settledPaidMap[member.id] || 0;
+      const settledReceived = settledReceivedMap[member.id] || 0;
+      const balance = (paid - owed) + settledPaid - settledReceived;
       return {
         user_id: member.id,
         name: member.name,
@@ -394,6 +412,65 @@ app.put('/organizations/:id/expenses/:expenseId', authMiddleware, expenseValidat
   }
 });
 
+
+
+app.post('/organizations/:id/settle', authMiddleware, async (req, res) => {
+  try {
+    const membership = await db.query(
+      'SELECT * FROM organization_members WHERE organization_id = $1 AND user_id = $2',
+      [req.params.id, req.userId]
+    );
+    if (membership.rows.length === 0) {
+      return res.status(403).json({ error: 'You are not a member of this organization' });
+    }
+
+    const { paid_to, amount } = req.body;
+
+    if (!paid_to || !amount) {
+      return res.status(400).json({ error: 'paid_to and amount are required' });
+    }
+
+    const result = await db.query(
+      'INSERT INTO settlements (organization_id, paid_by, paid_to, amount) VALUES ($1, $2, $3, $4) RETURNING *',
+      [req.params.id, req.userId, paid_to, amount]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
+app.post('/organizations/:id/settle', authMiddleware, async (req, res) => {
+  try {
+    const membership = await db.query(
+      'SELECT * FROM organization_members WHERE organization_id = $1 AND user_id = $2',
+      [req.params.id, req.userId]
+    );
+    if (membership.rows.length === 0) {
+      return res.status(403).json({ error: 'You are not a member of this organization' });
+    }
+
+    const { paid_to, amount } = req.body;
+
+    if (!paid_to || !amount) {
+      return res.status(400).json({ error: 'paid_to and amount are required' });
+    }
+
+    const result = await db.query(
+      'INSERT INTO settlements (organization_id, paid_by, paid_to, amount) VALUES ($1, $2, $3, $4) RETURNING *',
+      [req.params.id, req.userId, paid_to, amount]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.delete('/organizations/:id/members/:userId', authMiddleware, async (req, res) => {
   try {
     const membership = await db.query(
@@ -452,6 +529,34 @@ app.delete('/organizations/:id/expenses/:expenseId', authMiddleware, async (req,
     res.status(500).json({ error: 'Server error' });
   }
 });
+app.post('/organizations/:id/settle', authMiddleware, async (req, res) => {
+  try {
+    const membership = await db.query(
+      'SELECT * FROM organization_members WHERE organization_id = $1 AND user_id = $2',
+      [req.params.id, req.userId]
+    );
+    if (membership.rows.length === 0) {
+      return res.status(403).json({ error: 'You are not a member of this organization' });
+    }
+
+    const { paid_to, amount } = req.body;
+
+    if (!paid_to || !amount) {
+      return res.status(400).json({ error: 'paid_to and amount are required' });
+    }
+
+    const result = await db.query(
+      'INSERT INTO settlements (organization_id, paid_by, paid_to, amount) VALUES ($1, $2, $3, $4) RETURNING *',
+      [req.params.id, req.userId, paid_to, amount]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Expense tracker server running on port ${PORT}`);
 });
