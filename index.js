@@ -394,6 +394,38 @@ app.put('/organizations/:id/expenses/:expenseId', authMiddleware, expenseValidat
   }
 });
 
+app.delete('/organizations/:id/members/:userId', authMiddleware, async (req, res) => {
+  try {
+    const membership = await db.query(
+      'SELECT role FROM organization_members WHERE organization_id = $1 AND user_id = $2',
+      [req.params.id, req.userId]
+    );
+    if (membership.rows.length === 0) {
+      return res.status(403).json({ error: 'You are not a member of this organization' });
+    }
+    if (membership.rows[0].role !== 'owner') {
+      return res.status(403).json({ error: 'Only the owner can remove members' });
+    }
+    if (parseInt(req.params.userId) === req.userId) {
+      return res.status(400).json({ error: 'Owner cannot remove themselves' });
+    }
+
+    const result = await db.query(
+      'DELETE FROM organization_members WHERE organization_id = $1 AND user_id = $2 RETURNING user_id',
+      [req.params.id, req.params.userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Member not found in this organization' });
+    }
+
+    res.json({ message: 'Member removed' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 app.delete('/organizations/:id/expenses/:expenseId', authMiddleware, async (req, res) => {
   try {
     const membership = await db.query(
