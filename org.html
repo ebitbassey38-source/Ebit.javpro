@@ -189,6 +189,11 @@
     <div class="card-title">Add Expense</div>
     <input type="text" id="expenseDesc" placeholder="Description (e.g. Dinner)">
     <input type="number" id="expenseAmount" placeholder="Amount" step="0.01">
+    <select id="splitType">
+      <option value="equal">Split equally among all members</option>
+      <option value="custom">Custom split</option>
+    </select>
+    <div id="customSplitContainer" style="display:none;"></div>
     <button class="primary" id="addExpenseBtn">Add Expense</button>
   </div>
 
@@ -286,9 +291,12 @@
     }
   }
 
+  let orgMembersCache = [];
+
   async function loadBalances() {
     try {
       const balances = await apiCall('/organizations/' + orgId + '/balances');
+      orgMembersCache = balances.map(b => ({ user_id: b.user_id, name: b.name }));
       renderBalances(balances);
       populateSettleDropdown(balances);
     } catch (err) {
@@ -407,6 +415,35 @@
     }
   }
 
+  const splitTypeSelect = document.getElementById('splitType');
+  const customSplitContainer = document.getElementById('customSplitContainer');
+
+  function renderCustomSplitInputs() {
+    customSplitContainer.innerHTML = '';
+    if (orgMembersCache.length === 0) {
+      customSplitContainer.innerHTML = '<div class="empty">No members to split between</div>';
+      return;
+    }
+    orgMembersCache.forEach(m => {
+      const row = document.createElement('div');
+      row.style.marginBottom = '8px';
+      row.innerHTML = `
+        <label style="display:block; font-size:13px; color:#555; margin-bottom:4px;">${escapeHtml(m.name)}</label>
+        <input type="number" step="0.01" class="custom-split-input" data-user-id="${m.user_id}" placeholder="Amount" style="margin-bottom:0;">
+      `;
+      customSplitContainer.appendChild(row);
+    });
+  }
+
+  splitTypeSelect.addEventListener('change', () => {
+    if (splitTypeSelect.value === 'custom') {
+      renderCustomSplitInputs();
+      customSplitContainer.style.display = 'block';
+    } else {
+      customSplitContainer.style.display = 'none';
+    }
+  });
+
   document.getElementById('addExpenseBtn').addEventListener('click', async () => {
     const desc = document.getElementById('expenseDesc').value.trim();
     const amount = parseFloat(document.getElementById('expenseAmount').value);
@@ -416,13 +453,38 @@
       return;
     }
 
+    const payload = { description: desc, amount };
+
+    if (splitTypeSelect.value === 'custom') {
+      const inputs = document.querySelectorAll('.custom-split-input');
+      const splits = [];
+      let sum = 0;
+      for (const input of inputs) {
+        const val = parseFloat(input.value);
+        if (!val || val < 0) {
+          showError('Please enter a valid amount for every member');
+          return;
+        }
+        splits.push({ user_id: parseInt(input.dataset.userId), amount: val });
+        sum += val;
+      }
+      if (Math.abs(sum - amount) > 0.01) {
+        showError('Custom split amounts must add up to the total (' + sum.toFixed(2) + ' vs ' + amount.toFixed(2) + ')');
+        return;
+      }
+      payload.splits = splits;
+    }
+
     try {
       await apiCall('/organizations/' + orgId + '/expenses', {
         method: 'POST',
-        body: JSON.stringify({ description: desc, amount })
+        body: JSON.stringify(payload)
       });
       document.getElementById('expenseDesc').value = '';
       document.getElementById('expenseAmount').value = '';
+      splitTypeSelect.value = 'equal';
+      customSplitContainer.style.display = 'none';
+      customSplitContainer.innerHTML = '';
       showSuccess('Expense added');
       loadExpenses();
       loadBalances();
