@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Organization - Expense Tracker</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f6fa;
+    min-height: 100vh;
+    padding-bottom: 40px;
+  }
+  header {
+    background: white;
+    padding: 16px 20px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .back {
+    color: #4a69bd;
+    font-size: 20px;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  header h1 {
+    font-size: 18px;
+    color: #2c3e50;
+  }
+  main {
+    padding: 16px;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .card {
+    background: white;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+  }
+  .card-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 12px;
+  }
+  .balance-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .balance-row:last-child {
+    border-bottom: none;
+  }
+  .balance-name {
+    font-size: 15px;
+    color: #2c3e50;
+  }
+  .balance-amount {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .owed { color: #27ae60; }
+  .owes { color: #c0392b; }
+  .settled { color: #888; }
+  .expense-row {
+    padding: 12px 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .expense-row:last-child {
+    border-bottom: none;
+  }
+  .expense-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .expense-desc {
+    font-size: 15px;
+    font-weight: 600;
+    color: #2c3e50;
+  }
+  .expense-amount {
+    font-size: 15px;
+    font-weight: 600;
+    color: #2c3e50;
+  }
+  .expense-meta {
+    font-size: 12px;
+    color: #888;
+    margin-top: 2px;
+  }
+  .expense-actions {
+    margin-top: 8px;
+    display: flex;
+    gap: 12px;
+  }
+  .expense-actions button {
+    background: none;
+    border: none;
+    font-size: 13px;
+    color: #4a69bd;
+    cursor: pointer;
+    padding: 0;
+  }
+  .expense-actions .delete-btn {
+    color: #c0392b;
+  }
+  input, select {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 16px;
+    margin-bottom: 10px;
+  }
+  button.primary {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: #4a69bd;
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .error {
+    background: #fdecea;
+    color: #c0392b;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .success {
+    background: #eafaf1;
+    color: #27ae60;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .loading, .empty {
+    text-align: center;
+    color: #888;
+    padding: 20px;
+  }
+  .member-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+  }
+  .member-remove {
+    color: #c0392b;
+    font-size: 13px;
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/dashboard.html" class="back">&larr;</a>
+  <h1 id="orgTitle">Organization</h1>
+</header>
+
+<main>
+  <div class="error" id="errorBox"></div>
+  <div class="success" id="successBox"></div>
+
+  <div class="card">
+    <div class="card-title">Balances</div>
+    <div id="balancesList" class="loading">Loading...</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Add Expense</div>
+    <input type="text" id="expenseDesc" placeholder="Description (e.g. Dinner)">
+    <input type="number" id="expenseAmount" placeholder="Amount" step="0.01">
+    <button class="primary" id="addExpenseBtn">Add Expense</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Expenses</div>
+    <div id="expensesList" class="loading">Loading...</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Members</div>
+    <div id="membersList" class="loading">Loading...</div>
+    <input type="email" id="inviteEmail" placeholder="Invite by email" style="margin-top: 12px;">
+    <button class="primary" id="inviteBtn">Invite Member</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Settle Up</div>
+    <select id="settleTo"></select>
+    <input type="number" id="settleAmount" placeholder="Amount" step="0.01">
+    <button class="primary" id="settleBtn">Record Payment</button>
+  </div>
+</main>
+
+<script>
+  const token = localStorage.getItem('token');
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+
+  if (!token || !user) {
+    window.location.href = '/login.html';
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const orgId = params.get('id');
+
+  if (!orgId) {
+    window.location.href = '/dashboard.html';
+  }
+
+  const errorBox = document.getElementById('errorBox');
+  const successBox = document.getElementById('successBox');
+  const balancesList = document.getElementById('balancesList');
+  const expensesList = document.getElementById('expensesList');
+  const membersList = document.getElementById('membersList');
+  const settleTo = document.getElementById('settleTo');
+
+  function showError(msg) {
+    errorBox.textContent = msg;
+    errorBox.style.display = 'block';
+    successBox.style.display = 'none';
+  }
+
+  function showSuccess(msg) {
+    successBox.textContent = msg;
+    successBox.style.display = 'block';
+    errorBox.style.display = 'none';
+    setTimeout(() => { successBox.style.display = 'none'; }, 3000);
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  async function apiCall(path, options = {}) {
+    const res = await fetch(path, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token,
+        ...(options.headers || {})
+      }
+    });
+
+    if (res.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login.html';
+      throw new Error('Session expired');
+    }
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Request failed');
+    }
+    return data;
+  }
+
+  async function loadOrgDetails() {
+    try {
+      const org = await apiCall('/organizations/' + orgId);
+      document.getElementById('orgTitle').textContent = org.name;
+    } catch (err) {
+      showError(err.message);
+    }
+  }
+
+  async function loadBalances() {
+    try {
+      const balances = await apiCall('/organizations/' + orgId + '/balances');
+      renderBalances(balances);
+      populateSettleDropdown(balances);
+    } catch (err) {
+      balancesList.innerHTML = '';
+      showError(err.message);
+    }
+  }
+
+  function renderBalances(balances) {
+    if (balances.length === 0) {
+      balancesList.innerHTML = '<div class="empty">No members yet</div>';
+      return;
+    }
+    balancesList.innerHTML = '';
+    balances.forEach(b => {
+      const row = document.createElement('div');
+      row.className = 'balance-row';
+      const cls = b.status === 'is owed money' ? 'owed' : b.status === 'owes money' ? 'owes' : 'settled';
+      const label = b.status === 'is owed money' ? ('is owed $' + b.balance) :
+                    b.status === 'owes money' ? ('owes $' + Math.abs(b.balance)) : 'settled up';
+      row.innerHTML = `
+        <span class="balance-name">${escapeHtml(b.name)}</span>
+        <span class="balance-amount ${cls}">${label}</span>
+      `;
+      balancesList.appendChild(row);
+    });
+  }
+
+  function populateSettleDropdown(balances) {
+    settleTo.innerHTML = '';
+    balances.forEach(b => {
+      if (b.user_id !== user.id) {
+        const opt = document.createElement('option');
+        opt.value = b.user_id;
+        opt.textContent = b.name;
+        settleTo.appendChild(opt);
+      }
+    });
+    if (settleTo.options.length === 0) {
+      const opt = document.createElement('option');
+      opt.textContent = 'No other members';
+      settleTo.appendChild(opt);
+    }
+  }
+
+  async function loadExpenses() {
+    try {
+      const expenses = await apiCall('/organizations/' + orgId + '/expenses');
+      renderExpenses(expenses);
+    } catch (err) {
+      expensesList.innerHTML = '';
+      showError(err.message);
+    }
+  }
+
+  function renderExpenses(expenses) {
+    if (expenses.length === 0) {
+      expensesList.innerHTML = '<div class="empty">No expenses yet</div>';
+      return;
+    }
+    expensesList.innerHTML = '';
+    expenses.forEach(exp => {
+      const row = document.createElement('div');
+      row.className = 'expense-row';
+      const date = new Date(exp.created_at).toLocaleDateString();
+      row.innerHTML = `
+        <div class="expense-top">
+          <span class="expense-desc">${escapeHtml(exp.description)}</span>
+          <span class="expense-amount">$${exp.amount}</span>
+        </div>
+        <div class="expense-meta">Paid by ${escapeHtml(exp.paid_by_name || '')} on ${date}</div>
+        <div class="expense-actions">
+          <button class="edit-btn" data-id="${exp.id}" data-desc="${escapeHtml(exp.description)}" data-amount="${exp.amount}">Edit</button>
+          <button class="delete-btn" data-id="${exp.id}">Delete</button>
+        </div>
+      `;
+      expensesList.appendChild(row);
+    });
+
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => deleteExpense(btn.dataset.id));
+    });
+    document.querySelectorAll('.edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => editExpense(btn.dataset.id, btn.dataset.desc, btn.dataset.amount));
+    });
+  }
+
+  async function deleteExpense(expenseId) {
+    if (!confirm('Delete this expense?')) return;
+    try {
+      await apiCall('/organizations/' + orgId + '/expenses/' + expenseId, { method: 'DELETE' });
+      showSuccess('Expense deleted');
+      loadExpenses();
+      loadBalances();
+    } catch (err) {
+      showError(err.message);
+    }
+  }
+
+  async function editExpense(expenseId, currentDesc, currentAmount) {
+    const newDesc = prompt('Description:', currentDesc);
+    if (newDesc === null) return;
+    const newAmount = prompt('Amount:', currentAmount);
+    if (newAmount === null) return;
+
+    try {
+      await apiCall('/organizations/' + orgId + '/expenses/' + expenseId, {
+        method: 'PUT',
+        body: JSON.stringify({ description: newDesc, amount: parseFloat(newAmount) })
+      });
+      showSuccess('Expense updated');
+      loadExpenses();
+      loadBalances();
+    } catch (err) {
+      showError(err.message);
+    }
+  }
+
+  document.getElementById('addExpenseBtn').addEventListener('click', async () => {
+    const desc = document.getElementById('expenseDesc').value.trim();
+    const amount = parseFloat(document.getElementById('expenseAmount').value);
+
+    if (!desc || !amount || amount <= 0) {
+      showError('Please enter a valid description and amount');
+      return;
+    }
+
+    try {
+      await apiCall('/organizations/' + orgId + '/expenses', {
+        method: 'POST',
+        body: JSON.stringify({ description: desc, amount })
+      });
+      document.getElementById('expenseDesc').value = '';
+      document.getElementById('expenseAmount').value = '';
+      showSuccess('Expense added');
+      loadExpenses();
+      loadBalances();
+    } catch (err) {
+      showError(err.message);
+    }
+  });
+
+  async function loadMembers() {
+    try {
+      const balances = await apiCall('/organizations/' + orgId + '/balances');
+      membersList.innerHTML = '';
+      balances.forEach(b => {
+        const row = document.createElement('div');
+        row.className = 'member-row';
+        const isSelf = b.user_id === user.id;
+        row.innerHTML = `
+          <span class="balance-name">${escapeHtml(b.name)}${isSelf ? ' (you)' : ''}</span>
+          ${!isSelf ? `<button class="member-remove" data-id="${b.user_id}">Remove</button>` : ''}
+        `;
+        membersList.appendChild(row);
+      });
+      document.querySelectorAll('.member-remove').forEach(btn => {
+        btn.addEventListener('click', () => removeMember(btn.dataset.id));
+      });
+    } catch (err) {
+      membersList.innerHTML = '';
+      showError(err.message);
+    }
+  }
+
+  async function removeMember(userId) {
+    if (!confirm('Remove this member from the organization?')) return;
+    try {
+      await apiCall('/organizations/' + orgId + '/members/' + userId, { method: 'DELETE' });
+      showSuccess('Member removed');
+      loadMembers();
+      loadBalances();
+    } catch (err) {
+      showError(err.message);
+    }
+  }
+
+  document.getElementById('inviteBtn').addEventListener('click', async () => {
+    const email = document.getElementById('inviteEmail').value.trim();
+    if (!email) {
+      showError('Please enter an email address');
+      return;
+    }
+    try {
+      await apiCall('/organizations/' + orgId + '/invite', {
+        method: 'POST',
+        body: JSON.stringify({ email })
+      });
+      document.getElementById('inviteEmail').value = '';
+      showSuccess('Member invited');
+      loadMembers();
+      loadBalances();
+    } catch (err) {
+      showError(err.message);
+    }
+  });
+
+  document.getElementById('settleBtn').addEventListener('click', async () => {
+    const paidTo = settleTo.value;
+    const amount = parseFloat(document.getElementById('settleAmount').value);
+
+    if (!paidTo || !amount || amount <= 0) {
+      showError('Please select a member and enter a valid amount');
+      return;
+    }
+
+    try {
+      await apiCall('/organizations/' + orgId + '/settle', {
+        method: 'POST',
+        body: JSON.stringify({ paid_to: parseInt(paidTo), amount })
+      });
+      document.getElementById('settleAmount').value = '';
+      showSuccess('Payment recorded');
+      loadBalances();
+    } catch (err) {
+      showError(err.message);
+    }
+  });
+
+  loadOrgDetails();
+  loadBalances();
+  loadExpenses();
+  loadMembers();
+</script>
+
+</body>
+</html>
