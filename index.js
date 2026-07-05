@@ -227,7 +227,7 @@ app.post('/organizations/:id/expenses', authMiddleware, expenseValidation, handl
       return res.status(403).json({ error: 'You are not a member of this organization' });
     }
 
-    const { description, amount } = req.body;
+    const { description, amount, splits } = req.body;
 
     const membersResult = await db.query(
       'SELECT user_id FROM organization_members WHERE organization_id = $1',
@@ -239,22 +239,40 @@ app.post('/organizations/:id/expenses', authMiddleware, expenseValidation, handl
       return res.status(400).json({ error: 'No members to split this expense between' });
     }
 
+    let finalSplits;
+
+    if (splits && Array.isArray(splits) && splits.length > 0) {
+      const memberIds = members.map(m => m.user_id);
+      for (const s of splits) {
+        if (!memberIds.includes(s.user_id)) {
+          return res.status(400).json({ error: 'Split includes a user who is not a member of this organization' });
+        }
+      }
+      const splitSum = splits.reduce((sum, s) => sum + parseFloat(s.amount), 0);
+      const totalAmount = parseFloat(amount);
+      if (Math.abs(splitSum - totalAmount) > 0.01) {
+        return res.status(400).json({ error: 'Custom split amounts must add up to the total expense amount' });
+      }
+      finalSplits = splits.map(s => ({ user_id: s.user_id, amount: parseFloat(s.amount).toFixed(2) }));
+    } else {
+      const splitAmount = (parseFloat(amount) / members.length).toFixed(2);
+      finalSplits = members.map(m => ({ user_id: m.user_id, amount: splitAmount }));
+    }
+
     const expenseResult = await db.query(
       'INSERT INTO expenses (organization_id, description, amount, paid_by) VALUES ($1, $2, $3, $4) RETURNING *',
       [req.params.id, description, amount, req.userId]
     );
     const expense = expenseResult.rows[0];
 
-    const splitAmount = (parseFloat(amount) / members.length).toFixed(2);
-
-    for (const member of members) {
+    for (const split of finalSplits) {
       await db.query(
         'INSERT INTO expense_splits (expense_id, user_id, amount_owed) VALUES ($1, $2, $3)',
-        [expense.id, member.user_id, splitAmount]
+        [expense.id, split.user_id, split.amount]
       );
     }
 
-    res.status(201).json({ ...expense, split_between: members.length, amount_per_person: splitAmount });
+    res.status(201).json({ ...expense, split_between: finalSplits.length, splits: finalSplits });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
