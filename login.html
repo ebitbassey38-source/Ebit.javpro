@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Expense Tracker</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f6fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  .card {
+    background: white;
+    border-radius: 12px;
+    padding: 32px 24px;
+    max-width: 380px;
+    width: 100%;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  }
+  h1 {
+    font-size: 24px;
+    margin-bottom: 24px;
+    text-align: center;
+    color: #2c3e50;
+  }
+  .field {
+    margin-bottom: 16px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    color: #555;
+    margin-bottom: 6px;
+  }
+  input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 16px;
+  }
+  input:focus {
+    outline: none;
+    border-color: #4a69bd;
+  }
+  button {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 8px;
+    background: #4a69bd;
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  button:active {
+    background: #3c58a8;
+  }
+  .toggle {
+    text-align: center;
+    margin-top: 16px;
+    font-size: 14px;
+    color: #4a69bd;
+    cursor: pointer;
+  }
+  .error {
+    background: #fdecea;
+    color: #c0392b;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 16px;
+    display: none;
+  }
+  .hidden {
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1 id="formTitle">Log In</h1>
+  <div class="error" id="errorBox"></div>
+
+  <form id="authForm">
+    <div class="field hidden" id="nameField">
+      <label>Name</label>
+      <input type="text" id="name" placeholder="Your name">
+    </div>
+    <div class="field">
+      <label>Email</label>
+      <input type="email" id="email" placeholder="you@example.com" required>
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="password" placeholder="At least 8 characters" required>
+    </div>
+    <button type="submit" id="submitBtn">Log In</button>
+  </form>
+
+  <div class="toggle" id="toggleMode">Don't have an account? Sign up</div>
+</div>
+
+<script>
+  const API_BASE = ''; // same origin, no prefix needed
+
+  let isSignup = false;
+
+  const form = document.getElementById('authForm');
+  const toggle = document.getElementById('toggleMode');
+  const formTitle = document.getElementById('formTitle');
+  const submitBtn = document.getElementById('submitBtn');
+  const nameField = document.getElementById('nameField');
+  const errorBox = document.getElementById('errorBox');
+
+  toggle.addEventListener('click', () => {
+    isSignup = !isSignup;
+    if (isSignup) {
+      formTitle.textContent = 'Sign Up';
+      submitBtn.textContent = 'Sign Up';
+      toggle.textContent = 'Already have an account? Log in';
+      nameField.classList.remove('hidden');
+    } else {
+      formTitle.textContent = 'Log In';
+      submitBtn.textContent = 'Log In';
+      toggle.textContent = "Don't have an account? Sign up";
+      nameField.classList.add('hidden');
+    }
+    errorBox.style.display = 'none';
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorBox.style.display = 'none';
+
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const name = document.getElementById('name').value.trim();
+
+    const endpoint = isSignup ? '/signup' : '/login';
+    const body = isSignup ? { name, email, password } : { email, password };
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Please wait...';
+
+    try {
+      const res = await fetch(API_BASE + endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Something went wrong');
+      }
+
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      window.location.href = '/dashboard.html';
+
+    } catch (err) {
+      errorBox.textContent = err.message;
+      errorBox.style.display = 'block';
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = isSignup ? 'Sign Up' : 'Log In';
+    }
+  });
+</script>
+
+</body>
+</html>
