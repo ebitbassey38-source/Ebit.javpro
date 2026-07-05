@@ -3,6 +3,9 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const db = require('./db');
 const { hashPassword, comparePassword, generateToken, authMiddleware } = require('./auth');
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -552,6 +555,79 @@ app.post('/organizations/:id/settle', authMiddleware, async (req, res) => {
     );
 
     res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const userResult = await db.query('SELECT id, name FROM users WHERE email = $1', [email]);
+
+    if (userResult.rows.length > 0) {
+      const user = userResult.rows[0];
+      const token = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+      await db.query(
+        'INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)',
+        [user.id, token, expiresAt]
+      );
+
+      const resetLink = 'https://ebit-expense-tracker.onrender.com/reset-password.html?token=' + token;
+
+      try {
+        await resend.emails.send({
+          from: 'Expense Tracker <onboarding@resend.dev>',
+          to: email,
+          subject: 'Reset your password',
+          html: '<p>Hi ' + user.name + ',</p><p>Click the link below to reset your password. This link expires in 1 hour.</p><p><a href="' + resetLink + '">Reset Password</a></p>'
+        });
+      } catch (emailErr) {
+        console.error('Email send error:', emailErr);
+      }
+    }
+
+    res.json({ message: 'If an account exists with that email, a reset link has been sent.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword) {
+      return res.status(400).json({ error: 'Token and new password are required' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
+    const resetResult = await db.query(
+      'SELECT * FROM password_resets WHERE token = $1 AND used = FALSE AND expires_at > NOW()',
+      [token]
+    );
+
+    if (resetResult.rows.length === 0) {
+      return res.status(400).json({ error: 'Invalid or expired reset link' });
+    }
+
+    const reset = resetResult.rows[0];
+    const passwordHash = await hashPassword(newPassword);
+
+    await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, reset.user_id]);
+    await db.query('UPDATE password_resets SET used = TRUE WHERE id = $1', [reset.id]);
+
+    res.json({ message: 'Password reset successfully' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
