@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard - Expense Tracker</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f6fa;
+    min-height: 100vh;
+  }
+  header {
+    background: white;
+    padding: 16px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }
+  header h1 {
+    font-size: 20px;
+    color: #2c3e50;
+  }
+  .logout {
+    color: #c0392b;
+    font-size: 14px;
+    cursor: pointer;
+    background: none;
+    border: none;
+  }
+  main {
+    padding: 20px;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .section-title {
+    font-size: 15px;
+    color: #555;
+    margin-bottom: 12px;
+    margin-top: 8px;
+  }
+  .org-card {
+    background: white;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .org-card:active {
+    background: #f0f0f0;
+  }
+  .org-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #2c3e50;
+  }
+  .org-arrow {
+    color: #aaa;
+    font-size: 18px;
+  }
+  .empty {
+    text-align: center;
+    color: #888;
+    padding: 40px 20px;
+  }
+  .create-form {
+    background: white;
+    border-radius: 10px;
+    padding: 16px;
+    margin-top: 20px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+  }
+  .create-form input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 16px;
+    margin-bottom: 10px;
+  }
+  .create-form button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: #4a69bd;
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .error {
+    background: #fdecea;
+    color: #c0392b;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 12px;
+    display: none;
+  }
+  .loading {
+    text-align: center;
+    color: #888;
+    padding: 30px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Your Organizations</h1>
+  <button class="logout" id="logoutBtn">Log out</button>
+</header>
+
+<main>
+  <div class="error" id="errorBox"></div>
+  <div id="orgList" class="loading">Loading...</div>
+
+  <div class="create-form">
+    <div class="section-title">Create new organization</div>
+    <input type="text" id="orgName" placeholder="e.g. Roommates, Trip to Lagos">
+    <button id="createBtn">Create Organization</button>
+  </div>
+</main>
+
+<script>
+  const token = localStorage.getItem('token');
+  const user = JSON.parse(localStorage.getItem('user') || 'null');
+
+  if (!token || !user) {
+    window.location.href = '/login.html';
+  }
+
+  const orgList = document.getElementById('orgList');
+  const errorBox = document.getElementById('errorBox');
+  const createBtn = document.getElementById('createBtn');
+  const orgNameInput = document.getElementById('orgName');
+
+  document.getElementById('logoutBtn').addEventListener('click', () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    window.location.href = '/login.html';
+  });
+
+  function showError(msg) {
+    errorBox.textContent = msg;
+    errorBox.style.display = 'block';
+  }
+
+  async function loadOrganizations() {
+    try {
+      const res = await fetch('/organizations', {
+        headers: { 'Authorization': 'Bearer ' + token }
+      });
+
+      if (res.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login.html';
+        return;
+      }
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to load organizations');
+      }
+
+      renderOrgs(data);
+
+    } catch (err) {
+      orgList.innerHTML = '';
+      showError(err.message);
+    }
+  }
+
+  function renderOrgs(orgs) {
+    if (orgs.length === 0) {
+      orgList.innerHTML = '<div class="empty">No organizations yet. Create one below to get started.</div>';
+      return;
+    }
+
+    orgList.innerHTML = '';
+    orgs.forEach(org => {
+      const card = document.createElement('div');
+      card.className = 'org-card';
+      card.innerHTML = `
+        <span class="org-name">${escapeHtml(org.name)}</span>
+        <span class="org-arrow">&rsaquo;</span>
+      `;
+      card.addEventListener('click', () => {
+        window.location.href = '/org.html?id=' + org.id;
+      });
+      orgList.appendChild(card);
+    });
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  createBtn.addEventListener('click', async () => {
+    const name = orgNameInput.value.trim();
+    if (!name) {
+      showError('Please enter an organization name');
+      return;
+    }
+
+    errorBox.style.display = 'none';
+    createBtn.disabled = true;
+    createBtn.textContent = 'Creating...';
+
+    try {
+      const res = await fetch('/organizations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify({ name })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to create organization');
+      }
+
+      orgNameInput.value = '';
+      loadOrganizations();
+
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      createBtn.disabled = false;
+      createBtn.textContent = 'Create Organization';
+    }
+  });
+
+  loadOrganizations();
+</script>
+
+</body>
+</html>
