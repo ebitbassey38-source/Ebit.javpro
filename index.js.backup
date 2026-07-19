@@ -3,18 +3,11 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const db = require('./db');
 const { hashPassword, comparePassword, generateToken, authMiddleware } = require('./auth');
-const { Resend } = require('resend');
-const resend = new Resend(process.env.RESEND_API_KEY);
-const crypto = require('crypto');
 
-const helmet = require('helmet');
 const app = express();
-app.use(helmet({ frameguard: { action: 'deny' }, contentSecurityPolicy: false }));
-app.use((req, res, next) => { res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin'); res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()'); next(); });
 const PORT = process.env.PORT || 3001;
 
 app.use(express.json());
-app.use(express.static('.'));
 
 function handleValidationErrors(req, res, next) {
   const errors = validationResult(req);
@@ -230,7 +223,7 @@ app.post('/organizations/:id/expenses', authMiddleware, expenseValidation, handl
       return res.status(403).json({ error: 'You are not a member of this organization' });
     }
 
-    const { description, amount, splits } = req.body;
+    const { description, amount } = req.body;
 
     const membersResult = await db.query(
       'SELECT user_id FROM organization_members WHERE organization_id = $1',
@@ -242,40 +235,22 @@ app.post('/organizations/:id/expenses', authMiddleware, expenseValidation, handl
       return res.status(400).json({ error: 'No members to split this expense between' });
     }
 
-    let finalSplits;
-
-    if (splits && Array.isArray(splits) && splits.length > 0) {
-      const memberIds = members.map(m => m.user_id);
-      for (const s of splits) {
-        if (!memberIds.includes(s.user_id)) {
-          return res.status(400).json({ error: 'Split includes a user who is not a member of this organization' });
-        }
-      }
-      const splitSum = splits.reduce((sum, s) => sum + parseFloat(s.amount), 0);
-      const totalAmount = parseFloat(amount);
-      if (Math.abs(splitSum - totalAmount) > 0.01) {
-        return res.status(400).json({ error: 'Custom split amounts must add up to the total expense amount' });
-      }
-      finalSplits = splits.map(s => ({ user_id: s.user_id, amount: parseFloat(s.amount).toFixed(2) }));
-    } else {
-      const splitAmount = (parseFloat(amount) / members.length).toFixed(2);
-      finalSplits = members.map(m => ({ user_id: m.user_id, amount: splitAmount }));
-    }
-
     const expenseResult = await db.query(
       'INSERT INTO expenses (organization_id, description, amount, paid_by) VALUES ($1, $2, $3, $4) RETURNING *',
       [req.params.id, description, amount, req.userId]
     );
     const expense = expenseResult.rows[0];
 
-    for (const split of finalSplits) {
+    const splitAmount = (parseFloat(amount) / members.length).toFixed(2);
+
+    for (const member of members) {
       await db.query(
         'INSERT INTO expense_splits (expense_id, user_id, amount_owed) VALUES ($1, $2, $3)',
-        [expense.id, split.user_id, split.amount]
+        [expense.id, member.user_id, splitAmount]
       );
     }
 
-    res.status(201).json({ ...expense, split_between: finalSplits.length, splits: finalSplits });
+    res.status(201).json({ ...expense, split_between: members.length, amount_per_person: splitAmount });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });
@@ -333,20 +308,6 @@ app.get('/organizations/:id/balances', authMiddleware, async (req, res) => {
       [req.params.id]
     );
 
-    const settlementsPaidResult = await db.query(
-      `SELECT paid_by as user_id, SUM(amount) as total_settled_paid
-       FROM settlements WHERE organization_id = $1
-       GROUP BY paid_by`,
-      [req.params.id]
-    );
-
-    const settlementsReceivedResult = await db.query(
-      `SELECT paid_to as user_id, SUM(amount) as total_settled_received
-       FROM settlements WHERE organization_id = $1
-       GROUP BY paid_to`,
-      [req.params.id]
-    );
-
     const membersResult = await db.query(
       `SELECT u.id, u.name FROM organization_members om
        JOIN users u ON u.id = om.user_id
@@ -356,15 +317,11 @@ app.get('/organizations/:id/balances', authMiddleware, async (req, res) => {
 
     const paidMap = Object.fromEntries(paidResult.rows.map(r => [r.user_id, parseFloat(r.total_paid)]));
     const owedMap = Object.fromEntries(owedResult.rows.map(r => [r.user_id, parseFloat(r.total_owed)]));
-    const settledPaidMap = Object.fromEntries(settlementsPaidResult.rows.map(r => [r.user_id, parseFloat(r.total_settled_paid)]));
-    const settledReceivedMap = Object.fromEntries(settlementsReceivedResult.rows.map(r => [r.user_id, parseFloat(r.total_settled_received)]));
 
     const balances = membersResult.rows.map(member => {
       const paid = paidMap[member.id] || 0;
       const owed = owedMap[member.id] || 0;
-      const settledPaid = settledPaidMap[member.id] || 0;
-      const settledReceived = settledReceivedMap[member.id] || 0;
-      const balance = (paid - owed) + settledPaid - settledReceived;
+      const balance = paid - owed;
       return {
         user_id: member.id,
         name: member.name,
@@ -554,107 +511,6 @@ app.delete('/organizations/:id/expenses/:expenseId', authMiddleware, async (req,
     res.status(500).json({ error: 'Server error' });
   }
 });
-app.post('/organizations/:id/settle', authMiddleware, async (req, res) => {
-  try {
-    const membership = await db.query(
-      'SELECT * FROM organization_members WHERE organization_id = $1 AND user_id = $2',
-      [req.params.id, req.userId]
-    );
-    if (membership.rows.length === 0) {
-      return res.status(403).json({ error: 'You are not a member of this organization' });
-    }
-
-    const { paid_to, amount } = req.body;
-
-    if (!paid_to || !amount) {
-      return res.status(400).json({ error: 'paid_to and amount are required' });
-    }
-
-    const result = await db.query(
-      'INSERT INTO settlements (organization_id, paid_by, paid_to, amount) VALUES ($1, $2, $3, $4) RETURNING *',
-      [req.params.id, req.userId, paid_to, amount]
-    );
-
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-app.post('/forgot-password', async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
-    }
-
-    const userResult = await db.query('SELECT id, name FROM users WHERE email = $1', [email]);
-
-    if (userResult.rows.length > 0) {
-      const user = userResult.rows[0];
-      const token = crypto.randomBytes(32).toString('hex');
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-
-      await db.query(
-        'INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, $3)',
-        [user.id, token, expiresAt]
-      );
-
-      const resetLink = 'https://ebit-expense-tracker.onrender.com/reset-password.html?token=' + token;
-
-      try {
-        await resend.emails.send({
-          from: 'Expense Tracker <onboarding@resend.dev>',
-          to: email,
-          subject: 'Reset your password',
-          html: '<p>Hi ' + user.name + ',</p><p>Click the link below to reset your password. This link expires in 1 hour.</p><p><a href="' + resetLink + '">Reset Password</a></p>'
-        });
-      } catch (emailErr) {
-        console.error('Email send error:', emailErr);
-      }
-    }
-
-    res.json({ message: 'If an account exists with that email, a reset link has been sent.' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-app.post('/reset-password', async (req, res) => {
-  try {
-    const { token, newPassword } = req.body;
-
-    if (!token || !newPassword) {
-      return res.status(400).json({ error: 'Token and new password are required' });
-    }
-    if (newPassword.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    }
-
-    const resetResult = await db.query(
-      'SELECT * FROM password_resets WHERE token = $1 AND used = FALSE AND expires_at > NOW()',
-      [token]
-    );
-
-    if (resetResult.rows.length === 0) {
-      return res.status(400).json({ error: 'Invalid or expired reset link' });
-    }
-
-    const reset = resetResult.rows[0];
-    const passwordHash = await hashPassword(newPassword);
-
-    await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, reset.user_id]);
-    await db.query('UPDATE password_resets SET used = TRUE WHERE id = $1', [reset.id]);
-
-    res.json({ message: 'Password reset successfully' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
 app.listen(PORT, () => {
   console.log(`Expense tracker server running on port ${PORT}`);
 });
